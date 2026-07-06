@@ -1,0 +1,59 @@
+# Production Docker build for the web app (Next.js standalone)
+
+FROM node:20-alpine AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+
+# Install all deps (including dev) for build
+FROM base AS deps
+WORKDIR /app
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json ./
+COPY apps ./apps
+COPY packages ./packages
+
+RUN pnpm install --frozen-lockfile
+
+# Build stage - enable standalone
+FROM base AS builder
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps ./apps
+COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/package.json /app/turbo.json ./
+COPY kosa.json ./
+COPY .dockerignore ./
+
+# Force standalone for Docker
+ENV NEXT_STANDALONE=true
+ENV DOCKER=true
+
+RUN pnpm --filter @repo/web build
+
+# Production runner - slim image
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copy the standalone output. Next puts server.js at the root of standalone/
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+# Static assets and public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
+
+USER nextjs
+
+EXPOSE 3000
+
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Standalone server
+CMD ["node", "server.js"]

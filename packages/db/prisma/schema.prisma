@@ -1,0 +1,10 @@
+// Add prisma schema here later when using real Mongo
+// For now we use mock data from kosa.json via @repo/lib + mock.ts
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
